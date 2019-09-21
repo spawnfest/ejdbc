@@ -19,6 +19,7 @@
 %%--------------------------------------------------------------------------
 %% Internal state
 -record(state, {erlang_port,                 % The port to the c-program
+	  tcp_port, 
 		reply_to,		     % gen_server From parameter 
 		owner,                       % Pid of the connection owner
 		result_set = undefined,      % exists | undefined
@@ -100,7 +101,37 @@ start_link_sup(Args) ->
 %%              to communicate with the database.
 %%-------------------------------------------------------------------------
 init(Args) ->
-   {ok, []}.
+   process_flag(trap_exit, true),
+    {value, {client, ClientPid}} = lists:keysearch(client, 1, Args),
+    erlang:monitor(process, ClientPid),
+    %% Start the port program (a java program) that utilizes the jdbc driver
+    case os:find_executable("java") of
+      JavaFileName when is_list(JavaFileName)->
+         JdbcServerJar = filename:nativename(filename:join(code:priv_dir(ejdbc), "jdbcserver.jar")),
+         Cp = case os:getenv("CLASSPATH") of
+                Classpath when is_list(Classpath) ->
+                   JdbcServerJar ++ ":" ++ Classpath;
+                false ->
+                   JdbcServerJar
+              end,
+         PortSettings = [{line, 100}, {args, ["-cp", Cp, "io.github.github.JdbcServer"]}],
+         Port = open_port({spawn_executable, JavaFileName}, PortSettings),
+         TclPort = receive
+            {Port,{Flag, {eol, "port=" ++ Line}}} ->
+                list_to_integer(Line);
+            Any ->
+                error
+         end,
+         State = #state{
+             erlang_port = Port,
+             tcp_port = TclPort,
+             owner = ClientPid
+         },
+
+         {ok, State};
+      false ->
+         {stop, java_program_executable_not_found}
+    end.
 
 %%--------------------------------------------------------------------------
 %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -115,7 +146,7 @@ init(Args) ->
 %% Note: The order of the function clauses is significant.
 %%--------------------------------------------------------------------------
 handle_call(ping, From, State) ->
-    {reply, pong, State}.
+    {reply, {pong, State#state.tcp_port}, State}.
 
 
 %%-------------------------------------------------------------------------
@@ -134,12 +165,13 @@ code_change(_Vsn, State, _Extra) ->
 connect(ConnectionReferense, ConnectionValues, Options) ->
      TimeOut = infinity,
      %% Send request, to open a database connection, to the control process.
-    case call(ConnectionReferense, {connect, ConnectionValues}, TimeOut) of
-	    ok ->
-	      {ok, ConnectionReferense};
-	    Error ->
-	      Error
-    end.
+%    case call(ConnectionReferense, {connect, ConnectionValues}, TimeOut) of
+%	    ok ->
+%	      {ok, ConnectionReferense};
+%	    Error ->
+%	      Error
+%    end.
+     {ok, ConnectionReferense}.
 
 %%-------------------------------------------------------------------------
 call(ConnectionReference, Msg, Timeout) ->
