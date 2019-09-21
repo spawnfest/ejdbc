@@ -1,0 +1,16 @@
+{application, ejdbc,
+ [{description, "An OTP application"},
+  {vsn, "0.1.0"},
+  {registered, [ejdbc_sup]},
+  {mod, { ejdbc_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, [ejdbc, ejdbc_app, ejdbc_sup]},
+
+  {maintainers, []},
+  {licenses, []},
+  {links, []}
+ ]}.
