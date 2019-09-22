@@ -13,13 +13,14 @@
 
 %%-------------------------------------------------------------------------
 %% gen_server callbacks
--export([init/1, handle_call/3, terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_info/2, terminate/2, code_change/3]).
 
 
 %%--------------------------------------------------------------------------
 %% Internal state
 -record(state, {erlang_port,                 % The port to the c-program
 	  tcp_port, 
+	  server_socket,
 		reply_to,		     % gen_server From parameter 
 		owner,                       % Pid of the connection owner
 		result_set = undefined,      % exists | undefined
@@ -108,11 +109,12 @@ init(Args) ->
     case os:find_executable("java") of
       JavaFileName when is_list(JavaFileName)->
          JdbcServerJar = filename:nativename(filename:join(code:priv_dir(ejdbc), "jdbcserver.jar")),
+         JinterfaceJar = filename:nativename(filename:join(code:priv_dir(ejdbc), "jinterface-1.6.1.jar")),
          Cp = case os:getenv("CLASSPATH") of
                 Classpath when is_list(Classpath) ->
-                   JdbcServerJar ++ ":" ++ Classpath;
+                   JdbcServerJar ++ ":" ++ JinterfaceJar ++ ":" ++ Classpath;
                 false ->
-                   JdbcServerJar
+                   JdbcServerJar ++ ":" ++ JinterfaceJar
               end,
          PortSettings = [{line, 100}, {args, ["-cp", Cp, "io.github.github.JdbcServer"]}],
          Port = open_port({spawn_executable, JavaFileName}, PortSettings),
@@ -122,12 +124,14 @@ init(Args) ->
             Any ->
                 error
          end,
+         {ok, ServerSocket} = gen_tcp:connect("localhost",TclPort,
+             [binary, {mode, binary}, {active, false}, {send_timeout, 5000}]),
          State = #state{
              erlang_port = Port,
              tcp_port = TclPort,
+             server_socket = ServerSocket,
              owner = ClientPid
          },
-
          {ok, State};
       false ->
          {stop, java_program_executable_not_found}
@@ -146,8 +150,16 @@ init(Args) ->
 %% Note: The order of the function clauses is significant.
 %%--------------------------------------------------------------------------
 handle_call(ping, From, State) ->
-    {reply, {pong, State#state.tcp_port}, State}.
+    {reply, {pong, State#state.tcp_port, State#state.server_socket}, State};
 
+handle_call({Client, Msg, Timeout}, From, State = 
+	    #state{owner = Client, reply_to = undefined})  ->
+    handle_msg(Msg, Timeout, State#state{reply_to = From}).
+
+
+handle_msg({connect, ConnectionValues, Options}, Timeout, State) ->
+    jdbc_send(State#state.server_socket, 1, ConnectionValues),
+    {reply, ok, State}.
 
 %%-------------------------------------------------------------------------
 %% terminate/2 and code_change/3
@@ -165,13 +177,13 @@ code_change(_Vsn, State, _Extra) ->
 connect(ConnectionReferense, ConnectionValues, Options) ->
      TimeOut = infinity,
      %% Send request, to open a database connection, to the control process.
-%    case call(ConnectionReferense, {connect, ConnectionValues}, TimeOut) of
-%	    ok ->
-%	      {ok, ConnectionReferense};
-%	    Error ->
-%	      Error
-%    end.
-     {ok, ConnectionReferense}.
+    case call(ConnectionReferense, {connect, ConnectionValues, Options}, TimeOut) of
+	    ok ->
+	      {ok, ConnectionReferense};
+	    Error ->
+	      Error
+    end.
+%     {ok, ConnectionReferense}.
 
 %%-------------------------------------------------------------------------
 call(ConnectionReference, Msg, Timeout) ->
@@ -189,7 +201,7 @@ call(ConnectionReference, Msg, Timeout) ->
       %% answer that was not directly received from the port-program.
       Term ->  
         Term
-    end. 
+    end.
 
 %%-------------------------------------------------------------------------
 decode(Binary) ->
@@ -201,3 +213,28 @@ decode(Binary) ->
       MultipleResultSets_or_Other ->
          MultipleResultSets_or_Other
     end.
+
+%---------------------------------------------------------------------------
+%% Catch all - throws away unknown messages (This could happen by "accident"
+%% so we do not want to crash, but we make a log entry as it is an
+%% unwanted behaviour.) 
+handle_info(Info, State) ->
+    Report = io_lib:format("JDBC: received: ~p~n", [Info]),
+    io:fwrite(Report),
+    % error_logger:error_report(Report),
+    {noreply, State}.
+
+
+%%-------------------------------------------------------------------------
+jdbc_send(Socket, Cmd, Msg) when is_integer(Cmd) -> %% Note currently all allowed messages are lists
+    Bindata = term_to_binary(Msg),
+    Binsize = byte_size(Bindata),
+    Senddata = [<<Cmd:8, Binsize:16>>, Bindata],
+    Report = io_lib:format("JDBC send: ~p~n", [Senddata]),
+    io:fwrite(Report),
+    % error_logger:error_report(Report),
+    %io:fwrite(Senddata),
+    %ok = gen_tcp:send(Socket, <<2:8, Binsize:16>>),
+    %ok = gen_tcp:send(Socket, Bindata),
+    ok = gen_tcp:send(Socket, Senddata),
+    ok = inet:setopts(Socket, [{active, once}]).
