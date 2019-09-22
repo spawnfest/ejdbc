@@ -13,16 +13,37 @@ ejdbc (Erlang JDBC) is Erlang bridge over JDBC API.
 
 ## How to compile
 
+### Optional build jdbcserver
+
+```
+cd jdbcserver
+mvn package
+cp target/jdbcserver-1.0-SNAPSHOT.jar ../ejdbc/priv/jdbcserver.jar
+cd ..
+```
+
+### Compile ejdbc
+
 ```
 cd ejdbc
 rebar3 compile
 ```
 
-## How to use
+## How to use (ignore log messages)
 
 ```
 cd ejdbc
+export CLASSPATH=./priv/h2-1.4.199.jar
 rebar3 shell
 
+>  application:start(ejdbc).
+>  {ok, Pid} = ejdbc:connect(<<"org.h2.Driver">>,<<"jdbc:h2:mem:">>,<<"sa">>,<<"">>, []).
+{ok,<0.131.0>}
+>
+>  TODO execute sql
+>
+>
+> ejdbc:disconnect(Pid).
+ok
 ```
 
