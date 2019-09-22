@@ -5,7 +5,7 @@
 -behaviour(gen_server).
 
 %% API --------------------------------------------------------------------
--export([start/0, start/1, stop/0, connect/5]).
+-export([start/0, start/1, stop/0, connect/5, disconnect/1]).
 
 %%-------------------------------------------------------------------------
 %% supervisor callbacks
@@ -84,6 +84,30 @@ connect(Driver, Url, Username, Password, Options) when is_list(Options) ->
            {error, ejdbc_not_started}
    end.
 
+%%--------------------------------------------------------------------------
+%% disconnect(ConnectionReferense) -> ok | {error, Reason}
+%%                                    
+%% Description: Disconnects from the database and terminates both the erlang
+%%              control process and the database handling java-process. 
+%%--------------------------------------------------------------------------
+disconnect(ConnectionReference) when is_pid(ConnectionReference)->
+    case call(ConnectionReference, disconnect, 5000) of 
+      {error, connection_closed} ->
+          %% If the connection has already been closed the effect of
+          %% disconnect has already been acomplished
+          ok; 
+      %% Note a time out of this call will return ok, as disconnect
+      %% will always succeed, the time out is to make sure
+      %% the connection is killed brutaly if it will not be shut down
+      %% gracefully.
+      ok ->
+          ok;
+      %% However you may receive an error message as result if you try to
+      %% disconnect a connection started by another process.
+      Other ->
+          Other
+    end. 
+
 
 %%--------------------------------------------------------------------------
 %% start_link_sup(Args) -> {ok, Pid} | {error, Reason} 
@@ -125,7 +149,7 @@ init(Args) ->
                 error
          end,
          {ok, ServerSocket} = gen_tcp:connect("localhost",TclPort,
-             [binary, {mode, binary}, {active, false}, {send_timeout, 5000}]),
+             [binary, {mode, binary}, {active, true}, {send_timeout, 5000}]),
          State = #state{
              erlang_port = Port,
              tcp_port = TclPort,
@@ -159,7 +183,11 @@ handle_call({Client, Msg, Timeout}, From, State =
 
 handle_msg({connect, ConnectionValues, Options}, Timeout, State) ->
     jdbc_send(State#state.server_socket, 1, ConnectionValues),
-    {reply, ok, State}.
+    {noreply, State};
+
+handle_msg(disconnect, Timeout, State) ->
+    jdbc_send(State#state.server_socket, 2, <<>>),
+    {noreply, State#state{state = disconnecting}, Timeout}.
 
 %%-------------------------------------------------------------------------
 %% terminate/2 and code_change/3
@@ -173,7 +201,6 @@ code_change(_Vsn, State, _Extra) ->
 %%%========================================================================
 %%% Internal functions
 %%%========================================================================
-
 connect(ConnectionReferense, ConnectionValues, Options) ->
      TimeOut = infinity,
      %% Send request, to open a database connection, to the control process.
@@ -183,12 +210,13 @@ connect(ConnectionReferense, ConnectionValues, Options) ->
 	    Error ->
 	      Error
     end.
-%     {ok, ConnectionReferense}.
 
 %%-------------------------------------------------------------------------
 call(ConnectionReference, Msg, Timeout) ->
     Result = (catch gen_server:call(ConnectionReference, {self(), Msg, Timeout}, infinity)),
     case Result of
+      ok ->
+         ok;
       %% Normal case, the result from the port-program has directly 
       %% been forwarded to the client
       Binary when is_binary(Binary) -> 
@@ -205,14 +233,71 @@ call(ConnectionReference, Msg, Timeout) ->
 
 %%-------------------------------------------------------------------------
 decode(Binary) ->
-    case binary_to_term(Binary) of
-      [ResultSet | []] -> 
-         ResultSet;
-      param_badarg ->
-        exit({badarg, ejdbc, param_query, 'Params'}); 
-      MultipleResultSets_or_Other ->
-         MultipleResultSets_or_Other
+   case Binary of
+     <<2, Size:32, ErrorMessage/binary>> -> 
+        {error, ErrorMessage};
+     BinaryData ->
+        case binary_to_term(BinaryData) of
+          [ResultSet | []] -> 
+             ResultSet;
+          param_badarg ->
+            exit({badarg, ejdbc, param_query, 'Params'}); 
+          MultipleResultSets_or_Other ->
+             MultipleResultSets_or_Other
+        end
     end.
+
+%%--------------------------------------------------------------------------
+%% handle_info(Msg, State) -> {noreply, State} | {noreply, State, Timeout} |
+%%            {stop, Reason, State}
+%% Description: Handles timouts, replys from the port-program and EXIT and
+%%    down messages.
+%% Note: The order of the function clauses is significant.
+%%--------------------------------------------------------------------------
+handle_info({tcp, Socket, BinData}, State = #state{state = connecting, 
+            reply_to = From,
+            server_socket = Socket}) ->
+    Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
+    io:fwrite(Report),
+    
+    case BinData of
+      % Simple ok
+      <<1>> ->
+          gen_server:reply(From, ok), 
+          {noreply, State#state{state = connected, reply_to = undefined}};
+      %<<2>> ->
+         %{ok, Len} = gen_tcp:recv(Socket, 4),
+         %<<A, B, C, D>> = Len,
+         %io:fwrite(io_lib:format("JDBC: recv: ~p~n", [Len])),
+         %{ok, Message} = gen_tcp:recv(Socket, D),
+         %io:fwrite(io_lib:format("JDBC: recv: ~p~n", [Message])),
+         %gen_server:reply(From, <<2, Len/binary, Message/binary>>);
+       %  gen_server:reply(From, <<2>>),
+       %  {noreply, State};
+      Message ->
+          Full = unpack(Socket, Message),
+          % {noreply, State}
+          gen_server:reply(From, Full), 
+          {noreply, State#state{reply_to = undefined}}
+          % {stop, normal, State#state{reply_to = undefined}}
+    end;
+
+handle_info({tcp, Socket, BinData}, State = #state{state = disconnecting,
+               reply_to = From}) ->
+    Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
+    io:fwrite(Report),
+    %% The connection will always be closed 
+    gen_server:reply(From, ok),  
+    case BinData of
+      <<1>> -> 
+          ok;
+      Message ->
+          Report =  io_lib:format("JDBC could not end connection "  
+                    "gracefully due to ~p~n", [Message]),
+          error_logger:error_report(Report)
+    end,
+    
+    {stop, normal, State#state{reply_to = undefined}};
 
 %---------------------------------------------------------------------------
 %% Catch all - throws away unknown messages (This could happen by "accident"
@@ -238,3 +323,23 @@ jdbc_send(Socket, Cmd, Msg) when is_integer(Cmd) -> %% Note currently all allowe
     %ok = gen_tcp:send(Socket, Bindata),
     ok = gen_tcp:send(Socket, Senddata),
     ok = inet:setopts(Socket, [{active, once}]).
+
+%%-------------------------------------------------------------------------
+unpack(Socket, <<X>>) ->
+    {ok, Len} = gen_tcp:recv(Socket, 4),
+    unpack(Socket, <<X, Len/binary>>);
+unpack(Socket, <<X, A>>) ->
+    {ok, Len} = gen_tcp:recv(Socket, 3),
+    unpack(Socket, <<X, A, Len/binary>>);
+unpack(Socket, <<X, A, B>>) ->
+    {ok, Len} = gen_tcp:recv(Socket, 2),
+    unpack(Socket, <<X, A, B, Len/binary>>);
+unpack(Socket, <<X, A, B, C>>) ->
+    {ok, Len} = gen_tcp:recv(Socket, 1),
+    unpack(Socket, <<X, A, B, C, Len/binary>>);
+unpack(Socket, <<X, A, B, C, D>>) ->
+    Len = C*256 + D,
+    {ok, Rest} = gen_tcp:recv(Socket, Len),
+    <<X, A, B, C, D, Rest/binary>>;
+unpack(Socket, Data = <<X, Len:32, Rest/binary>>) when byte_size(Rest) == Len ->
+    Data.

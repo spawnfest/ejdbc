@@ -24,8 +24,10 @@ public class Response {
 
     public void send(OutputStream out) throws IOException {
         out.write(response);
+        System.out.println("Response ID=" + response);
         if (data != null) {
             int length = data.length;
+            System.out.println("Response length=" + length);
             byte[] lengthByte = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(length).array();
             out.write(lengthByte);
             out.write(data);
@@ -37,6 +39,10 @@ public class Response {
         byte[] bytes = errorMessage.getBytes(Charset.forName("utf-8"));
         Response error = new Response((byte)2, bytes);
         return error;
+    }
+
+    public static Response error(Exception exception) {
+        return error(exception.getMessage());
     }
 /*
     private static Response ok() {

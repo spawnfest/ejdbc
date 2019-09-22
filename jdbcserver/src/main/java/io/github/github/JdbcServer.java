@@ -49,14 +49,21 @@ public class JdbcServer
             } catch (Exception e) {
                 e.printStackTrace();
                 System.out.println("====== Error: " + e.getMessage() + "======");
+                Response error = Response.error(e);
+                error.send(out);
             }
         }
 
-
+        try {
+            Thread.currentThread().wait(1000);
+        } catch (Exception e) {
+        }
 
         out.flush();
         out.close();
         socket.close();
+
+
     }
 
 

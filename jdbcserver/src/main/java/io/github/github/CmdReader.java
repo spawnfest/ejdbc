@@ -15,6 +15,7 @@ public class CmdReader {
     public CmdReader(InputStream is) {
         this.is = is;
         putCmd(new CmdConnect());
+        putCmd(new CmdClose());
     }
 
     private void putCmd(Cmd cmd) {
@@ -33,12 +34,15 @@ public class CmdReader {
         CmdDecoder cmdDecoder = cmdsMap.get(cmdId);
         if (cmdDecoder != null ) {
             System.out.println("cmdDecoder=" + cmdDecoder.getClass().toString());
-            byte[] data = new byte[length];
-            for (int i = 0; i < length; i++) {
-                data[i] = (byte) readByte();
-                // System.out.println("byte["+i+"]=" + data[i]);
+            OtpErlangObject term = null;
+            if (length>0) {
+                byte[] data = new byte[length];
+                for (int i = 0; i < length; i++) {
+                    data[i] = (byte) readByte();
+                    // System.out.println("byte["+i+"]=" + data[i]);
+                }
+                term = OtpErlangObject.decode(new OtpInputStream(data));
             }
-            OtpErlangObject term = OtpErlangObject.decode(new OtpInputStream(data));
             System.out.println("erlang term=" + term.toString());
             return cmdDecoder.decode(cmdId, term);
         } else {
