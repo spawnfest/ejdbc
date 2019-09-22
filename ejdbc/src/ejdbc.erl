@@ -5,7 +5,8 @@
 -behaviour(gen_server).
 
 %% API --------------------------------------------------------------------
--export([start/0, start/1, stop/0, connect/5, disconnect/1]).
+-export([start/0, start/1, stop/0, 
+        connect/5, disconnect/1, execute_query/2, execute_update/2]).
 
 %%-------------------------------------------------------------------------
 %% supervisor callbacks
@@ -108,6 +109,22 @@ disconnect(ConnectionReference) when is_pid(ConnectionReference)->
           Other
     end. 
 
+%%--------------------------------------------------------------------------
+%% execute_query(ConnectionReferense, Sql) -> {ok, data} | {error, Reason}
+%%                                    
+%% Description: Execute sql query and return rows
+%%--------------------------------------------------------------------------
+execute_query(ConnectionReference, Sql) when is_pid(ConnectionReference)->
+    call(ConnectionReference, {execute_query, Sql}, infinity).
+
+%%--------------------------------------------------------------------------
+%% execute_update(ConnectionReferense, Sql) -> {ok, row_count} | {error, Reason}
+%%                                    
+%% Description: Execute sql query updates and SQL Data Manipulation Language (DML)
+%%--------------------------------------------------------------------------
+execute_update(ConnectionReference, Sql) when is_pid(ConnectionReference)->
+    call(ConnectionReference, {execute_update, Sql}, infinity).
+
 
 %%--------------------------------------------------------------------------
 %% start_link_sup(Args) -> {ok, Pid} | {error, Reason} 
@@ -187,7 +204,15 @@ handle_msg({connect, ConnectionValues, Options}, Timeout, State) ->
 
 handle_msg(disconnect, Timeout, State) ->
     jdbc_send(State#state.server_socket, 2, <<>>),
-    {noreply, State#state{state = disconnecting}, Timeout}.
+    {noreply, State#state{state = disconnecting}, Timeout};
+
+handle_msg({execute_query, Sql}, Timeout, State) ->
+    jdbc_send(State#state.server_socket, 3, Sql),
+    {noreply, State, Timeout};
+
+handle_msg({execute_update, Sql}, Timeout, State) ->
+    jdbc_send(State#state.server_socket, 4, Sql),
+    {noreply, State, Timeout}.
 
 %%-------------------------------------------------------------------------
 %% terminate/2 and code_change/3
@@ -236,6 +261,8 @@ decode(Binary) ->
    case Binary of
      <<2, Size:32, ErrorMessage/binary>> -> 
         {error, ErrorMessage};
+     <<3, Size:32, Data/binary>> -> 
+        {ok, binary_to_term(<<131,Data/binary>>)};
      BinaryData ->
         case binary_to_term(BinaryData) of
           [ResultSet | []] -> 
@@ -257,8 +284,8 @@ decode(Binary) ->
 handle_info({tcp, Socket, BinData}, State = #state{state = connecting, 
             reply_to = From,
             server_socket = Socket}) ->
-    Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
-    io:fwrite(Report),
+    %Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
+    %io:fwrite(Report),
     
     case BinData of
       % Simple ok
@@ -276,6 +303,7 @@ handle_info({tcp, Socket, BinData}, State = #state{state = connecting,
        %  {noreply, State};
       Message ->
           Full = unpack(Socket, Message),
+
           % {noreply, State}
           gen_server:reply(From, Full), 
           {noreply, State#state{reply_to = undefined}}
@@ -284,8 +312,8 @@ handle_info({tcp, Socket, BinData}, State = #state{state = connecting,
 
 handle_info({tcp, Socket, BinData}, State = #state{state = disconnecting,
                reply_to = From}) ->
-    Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
-    io:fwrite(Report),
+    %Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
+    %io:fwrite(Report),
     %% The connection will always be closed 
     gen_server:reply(From, ok),  
     case BinData of
@@ -298,6 +326,20 @@ handle_info({tcp, Socket, BinData}, State = #state{state = disconnecting,
     end,
     
     {stop, normal, State#state{reply_to = undefined}};
+
+handle_info({tcp, Socket, BinData}, State = #state{state = connected,
+               reply_to = From}) ->
+    %Report = io_lib:format("JDBC: BinData: ~p~n", [BinData]),
+    %io:fwrite(Report),
+    case BinData of
+      <<1>> -> 
+          gen_server:reply(From, ok);
+      Message ->
+          Full = unpack(Socket, Message),
+          %io:fwrite(io_lib:format("data >> ~p~n", [Full])),
+          gen_server:reply(From, Full)
+    end,
+    {noreply, State#state{reply_to = undefined}};
 
 %---------------------------------------------------------------------------
 %% Catch all - throws away unknown messages (This could happen by "accident"
@@ -315,8 +357,8 @@ jdbc_send(Socket, Cmd, Msg) when is_integer(Cmd) -> %% Note currently all allowe
     Bindata = term_to_binary(Msg),
     Binsize = byte_size(Bindata),
     Senddata = [<<Cmd:8, Binsize:16>>, Bindata],
-    Report = io_lib:format("JDBC send: ~p~n", [Senddata]),
-    io:fwrite(Report),
+    %Report = io_lib:format("JDBC send: ~p~n", [Senddata]),
+    %io:fwrite(Report),
     % error_logger:error_report(Report),
     %io:fwrite(Senddata),
     %ok = gen_tcp:send(Socket, <<2:8, Binsize:16>>),

@@ -47,8 +47,8 @@ public class JdbcServer
                 Response res = cmd.doCmd(context);
                 res.send(out);
             } catch (Exception e) {
-                e.printStackTrace();
-                System.out.println("====== Error: " + e.getMessage() + "======");
+                // e.printStackTrace();
+                // System.out.println("====== Error: " + e.getMessage() + "======");
                 Response error = Response.error(e);
                 error.send(out);
             }

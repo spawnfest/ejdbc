@@ -16,6 +16,8 @@ public class CmdReader {
         this.is = is;
         putCmd(new CmdConnect());
         putCmd(new CmdClose());
+        putCmd(new CmdExecuteQuery());
+        putCmd(new CmdExecuteUpdate());
     }
 
     private void putCmd(Cmd cmd) {
@@ -24,16 +26,16 @@ public class CmdReader {
 
     public Cmd getReadCmd() throws Exception {
         int cmdId = readByte();
-        System.out.println("cmdId=" + cmdId);
+        // System.out.println("cmdId=" + cmdId);
         int lengthByte1 = readByte();
-        System.out.println("byte1=" + lengthByte1);
+        // System.out.println("byte1=" + lengthByte1);
         int lengthByte2 = readByte();
-        System.out.println("byte2=" + lengthByte2);
+        // System.out.println("byte2=" + lengthByte2);
         int length = ((lengthByte1<<8 & 0xff00) | (lengthByte2 & 0x00ff));
-        System.out.println("length=" + length);
+        // System.out.println("length=" + length);
         CmdDecoder cmdDecoder = cmdsMap.get(cmdId);
         if (cmdDecoder != null ) {
-            System.out.println("cmdDecoder=" + cmdDecoder.getClass().toString());
+            // System.out.println("cmdDecoder=" + cmdDecoder.getClass().toString());
             OtpErlangObject term = null;
             if (length>0) {
                 byte[] data = new byte[length];
@@ -43,7 +45,7 @@ public class CmdReader {
                 }
                 term = OtpErlangObject.decode(new OtpInputStream(data));
             }
-            System.out.println("erlang term=" + term.toString());
+            // System.out.println("erlang term=" + term.toString());
             return cmdDecoder.decode(cmdId, term);
         } else {
             is.skip(length);

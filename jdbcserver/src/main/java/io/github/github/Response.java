@@ -1,5 +1,8 @@
 package io.github.github;
 
+import com.ericsson.otp.erlang.OtpErlangObject;
+import com.ericsson.otp.erlang.OtpOutputStream;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -24,10 +27,10 @@ public class Response {
 
     public void send(OutputStream out) throws IOException {
         out.write(response);
-        System.out.println("Response ID=" + response);
+        // System.out.println("Response ID=" + response);
         if (data != null) {
             int length = data.length;
-            System.out.println("Response length=" + length);
+            // System.out.println("Response length=" + length);
             byte[] lengthByte = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(length).array();
             out.write(lengthByte);
             out.write(data);
@@ -51,4 +54,10 @@ public class Response {
     }
 
  */
+    public static Response okData(OtpErlangObject data) {
+        OtpOutputStream os = new OtpOutputStream();
+        data.encode(os);
+        Response okData = new Response((byte)3, os.toByteArray());
+        return okData;
+    }
 }

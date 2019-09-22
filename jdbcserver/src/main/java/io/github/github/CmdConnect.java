@@ -25,16 +25,11 @@ public class CmdConnect implements Cmd {
     public CmdConnect decode(int cmdId, OtpErlangObject term) throws Exception {
         CmdConnect c = new CmdConnect();
         OtpErlangTuple cmd = (OtpErlangTuple) term;
-        c.driver = getUtf8String(cmd.elementAt(0));
-        c.url = getUtf8String(cmd.elementAt(1));
-        c.username = getUtf8String(cmd.elementAt(2));
-        c.password = getUtf8String(cmd.elementAt(3));
+        c.driver = OtpUtil.getUtf8String(cmd.elementAt(0));
+        c.url = OtpUtil.getUtf8String(cmd.elementAt(1));
+        c.username = OtpUtil.getUtf8String(cmd.elementAt(2));
+        c.password = OtpUtil.getUtf8String(cmd.elementAt(3));
         return c;
-    }
-
-    private String getUtf8String(OtpErlangObject o) throws UnsupportedEncodingException {
-        OtpErlangBinary b = (OtpErlangBinary)o;
-        return new String(b.binaryValue(), "UTF-8" );
     }
 
     @Override
