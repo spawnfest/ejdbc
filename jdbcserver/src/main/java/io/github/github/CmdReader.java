@@ -23,16 +23,23 @@ public class CmdReader {
 
     public Cmd getReadCmd() throws Exception {
         int cmdId = readByte();
+        System.out.println("cmdId=" + cmdId);
         int lengthByte1 = readByte();
+        System.out.println("byte1=" + lengthByte1);
         int lengthByte2 = readByte();
+        System.out.println("byte2=" + lengthByte2);
         int length = ((lengthByte1<<8 & 0xff00) | (lengthByte2 & 0x00ff));
+        System.out.println("length=" + length);
         CmdDecoder cmdDecoder = cmdsMap.get(cmdId);
         if (cmdDecoder != null ) {
+            System.out.println("cmdDecoder=" + cmdDecoder.getClass().toString());
             byte[] data = new byte[length];
             for (int i = 0; i < length; i++) {
                 data[i] = (byte) readByte();
+                // System.out.println("byte["+i+"]=" + data[i]);
             }
             OtpErlangObject term = OtpErlangObject.decode(new OtpInputStream(data));
+            System.out.println("erlang term=" + term.toString());
             return cmdDecoder.decode(cmdId, term);
         } else {
             is.skip(length);

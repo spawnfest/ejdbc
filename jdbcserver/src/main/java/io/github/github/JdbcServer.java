@@ -2,6 +2,7 @@ package io.github.github;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -19,13 +20,16 @@ public class JdbcServer
         ServerSocket serverSocket = new ServerSocket(0);
         System.out.println("port="+serverSocket.getLocalPort());
         Socket socket = serverSocket.accept();
-        PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+        // PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+        OutputStream out = socket.getOutputStream();
         CmdReader cmdReader = new CmdReader(socket.getInputStream());
         //java.net.SocketInputStream in = socket.getInputStream();
 
         // System.out.println("socket.getInputStream()" + in.getClass().toString());
 
         // Scanner inScanner = new Scanner(socket.getInputStream());
+
+
 
         ConnectionContext context = new ConnectionContext();
         serverSocket.close();
@@ -40,9 +44,11 @@ public class JdbcServer
             }*/
             try {
                 Cmd cmd = cmdReader.getReadCmd();
-                cmd.doCmd(context);
+                Response res = cmd.doCmd(context);
+                res.send(out);
             } catch (Exception e) {
-
+                e.printStackTrace();
+                System.out.println("====== Error: " + e.getMessage() + "======");
             }
         }
 
